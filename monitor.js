@@ -73,36 +73,11 @@ function formatEth(hexValue) {
   return `${eth.toFixed(6)} ETH`;
 }
 
-// ─── Telegram Alert ───────────────────────────────────────────────────────────
-async function sendTelegram(tx, blockNumber) {
-  if (!CONFIG.telegram.botToken || !CONFIG.telegram.chatId) {
-    console.warn("⚠️  Telegram not configured — check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your variables.");
-    return;
-  }
-
-  const isOutgoing = tx.from?.toLowerCase() === CONFIG.address.toLowerCase();
-  const direction = isOutgoing ? "📤 OUTGOING" : "📥 INCOMING";
-
-  const message =
-    `🔔 *Ink Network Transaction Alert*\n\n` +
-    `${direction}\n` +
-    `*Block:* \`${blockNumber}\`\n` +
-    `*Hash:* \`${tx.hash}\`\n` +
-    `*From:* \`${tx.from}\`\n` +
-    `*To:* \`${tx.to || "Contract Creation"}\`\n` +
-    `*Value:* ${formatEth(tx.value)}\n` +
-    `*Gas Price:* ${tx.gasPrice ? Math.round(Number(BigInt(tx.gasPrice)) / 1e9) + " Gwei" : "N/A"}\n\n` +
-    `[View on Explorer](${explorerTxUrl(tx.hash)})`;
-
-  const url = `https://api.telegram.org/bot${CONFIG.telegram.botToken}/sendMessage`;
-  const body = JSON.stringify({
-    chat_id: CONFIG.telegram.chatId,
-    text: message,
-    parse_mode: "Markdown",
-    disable_web_page_preview: false,
-  });
-
+// ─── Telegram Helper ──────────────────────────────────────────────────────────
+function telegramPost(payload) {
   return new Promise((resolve, reject) => {
+    const url = `https://api.telegram.org/bot${CONFIG.telegram.botToken}/sendMessage`;
+    const body = JSON.stringify(payload);
     const req = https.request(
       url,
       {
@@ -116,14 +91,7 @@ async function sendTelegram(tx, blockNumber) {
         let data = "";
         res.on("data", (c) => (data += c));
         res.on("end", () => {
-          const parsed = JSON.parse(data);
-          if (parsed.ok) {
-            console.log("✅ Telegram alert sent");
-            resolve();
-          } else {
-            console.error("❌ Telegram error:", parsed.description);
-            reject(new Error(parsed.description));
-          }
+          try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
         });
       }
     );
@@ -131,6 +99,50 @@ async function sendTelegram(tx, blockNumber) {
     req.write(body);
     req.end();
   });
+}
+
+// ─── Telegram Alert ───────────────────────────────────────────────────────────
+async function sendTelegram(tx, blockNumber) {
+  if (!CONFIG.telegram.botToken || !CONFIG.telegram.chatId) {
+    console.warn("⚠️  Telegram not configured — check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your variables.");
+    return;
+  }
+
+  const isOutgoing = tx.from?.toLowerCase() === CONFIG.address.toLowerCase();
+  const direction = isOutgoing ? "📤 OUTGOING" : "📥 INCOMING";
+
+  // First message: loud alarm ping (forces sound even if phone is on silent via Telegram's alert system)
+  await telegramPost({
+    chat_id: CONFIG.telegram.chatId,
+    text: "🚨🚨🚨 INK TRANSACTION DETECTED 🚨🚨🚨",
+    disable_notification: false,
+  });
+
+  // Second message: full details
+  const details =
+    `🔔 *Ink Network Transaction Alert*\n\n` +
+    `${direction}\n` +
+    `*Block:* \`${blockNumber}\`\n` +
+    `*Hash:* \`${tx.hash}\`\n` +
+    `*From:* \`${tx.from}\`\n` +
+    `*To:* \`${tx.to || "Contract Creation"}\`\n` +
+    `*Value:* ${formatEth(tx.value)}\n` +
+    `*Gas Price:* ${tx.gasPrice ? Math.round(Number(BigInt(tx.gasPrice)) / 1e9) + " Gwei" : "N/A"}\n\n` +
+    `[View on Explorer](${explorerTxUrl(tx.hash)})`;
+
+  const result = await telegramPost({
+    chat_id: CONFIG.telegram.chatId,
+    text: details,
+    parse_mode: "Markdown",
+    disable_notification: false,
+    disable_web_page_preview: false,
+  });
+
+  if (result.ok) {
+    console.log("✅ Telegram alert sent");
+  } else {
+    console.error("❌ Telegram error:", result.description);
+  }
 }
 
 // ─── Process a Block ──────────────────────────────────────────────────────────
