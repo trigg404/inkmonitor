@@ -1,7 +1,6 @@
 /**
  * Ink Network Transaction Monitor
- * Watches address 0x38Ec515FE36b359b9d54e94337497C2D982aA1B1
- * Sends Telegram alerts on new transactions
+ * Watches multiple addresses and sends Telegram alerts on new transactions
  */
 
 require("dotenv").config();
@@ -10,7 +9,10 @@ const http = require("http");
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const CONFIG = {
-  address: "0x38Ec515FE36b359b9d54e94337497C2D982aA1B1",
+  addresses: [
+    "0x38Ec515FE36b359b9d54e94337497C2D982aA1B1",
+    "0x0c2EC7F7DA019F0708B4556C2489892952461734",
+  ],
   inkRpcUrl: process.env.INK_RPC_URL || "https://rpc-qnd.inkonchain.com",
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "15000"),
   telegram: {
@@ -18,6 +20,9 @@ const CONFIG = {
     chatId: process.env.TELEGRAM_CHAT_ID,
   },
 };
+
+// Lowercase set for fast lookup
+const watchedAddrs = new Set(CONFIG.addresses.map(a => a.toLowerCase()));
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let lastCheckedBlock = null;
@@ -73,6 +78,10 @@ function formatEth(hexValue) {
   return `${eth.toFixed(6)} ETH`;
 }
 
+function shortAddr(addr) {
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 // ─── Telegram Helper ──────────────────────────────────────────────────────────
 function telegramPost(payload) {
   return new Promise((resolve, reject) => {
@@ -102,26 +111,27 @@ function telegramPost(payload) {
 }
 
 // ─── Telegram Alert ───────────────────────────────────────────────────────────
-async function sendTelegram(tx, blockNumber) {
+async function sendTelegram(tx, blockNumber, matchedAddress) {
   if (!CONFIG.telegram.botToken || !CONFIG.telegram.chatId) {
     console.warn("⚠️  Telegram not configured — check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your variables.");
     return;
   }
 
-  const isOutgoing = tx.from?.toLowerCase() === CONFIG.address.toLowerCase();
+  const isOutgoing = tx.from?.toLowerCase() === matchedAddress.toLowerCase();
   const direction = isOutgoing ? "📤 OUTGOING" : "📥 INCOMING";
 
-  // First message: loud alarm ping (forces sound even if phone is on silent via Telegram's alert system)
+  // First message: loud alarm ping
   await telegramPost({
     chat_id: CONFIG.telegram.chatId,
-    text: "🚨🚨🚨 INK TRANSACTION DETECTED 🚨🚨🚨",
+    text: `🚨🚨🚨 INK TRANSACTION DETECTED\nAddress: ${shortAddr(matchedAddress)} 🚨🚨🚨`,
     disable_notification: false,
   });
 
   // Second message: full details
   const details =
     `🔔 *Ink Network Transaction Alert*\n\n` +
-    `${direction}\n` +
+    `*Watched Address:* \`${matchedAddress}\`\n` +
+    `${direction}\n\n` +
     `*Block:* \`${blockNumber}\`\n` +
     `*Hash:* \`${tx.hash}\`\n` +
     `*From:* \`${tx.from}\`\n` +
@@ -152,24 +162,31 @@ async function processBlock(blockHex) {
 
   if (!block || !block.transactions) return;
 
-  const watchedAddr = CONFIG.address.toLowerCase();
-
   for (const tx of block.transactions) {
-    const isSender = tx.from?.toLowerCase() === watchedAddr;
-    const isReceiver = tx.to?.toLowerCase() === watchedAddr;
+    if (seenTxHashes.has(tx.hash)) continue;
 
-    if ((isSender || isReceiver) && !seenTxHashes.has(tx.hash)) {
+    const fromMatch = watchedAddrs.has(tx.from?.toLowerCase());
+    const toMatch = watchedAddrs.has(tx.to?.toLowerCase());
+
+    if (fromMatch || toMatch) {
       seenTxHashes.add(tx.hash);
+
+      // Find which watched address was involved
+      const matchedAddress = CONFIG.addresses.find(a =>
+        a.toLowerCase() === tx.from?.toLowerCase() ||
+        a.toLowerCase() === tx.to?.toLowerCase()
+      );
 
       console.log(
         `\n🚨 Transaction detected in block ${blockNumber}!\n` +
+        `   Matched: ${matchedAddress}\n` +
         `   Hash: ${tx.hash}\n` +
         `   From: ${tx.from}\n` +
         `   To:   ${tx.to || "Contract Creation"}\n` +
         `   Value: ${formatEth(tx.value)}`
       );
 
-      await sendTelegram(tx, blockNumber);
+      await sendTelegram(tx, blockNumber, matchedAddress);
     }
   }
 }
@@ -202,7 +219,8 @@ async function poll() {
 // ─── Start ────────────────────────────────────────────────────────────────────
 console.log("═══════════════════════════════════════════");
 console.log("  Ink Network Transaction Monitor");
-console.log(`  Watching: ${CONFIG.address}`);
+console.log(`  Watching ${CONFIG.addresses.length} addresses:`);
+CONFIG.addresses.forEach(a => console.log(`  • ${a}`));
 console.log(`  Poll interval: ${CONFIG.pollIntervalMs / 1000}s`);
 console.log("═══════════════════════════════════════════");
 
