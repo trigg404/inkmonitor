@@ -1,0 +1,12 @@
+{
+  "name": "ink-alert-bot",
+  "version": "1.0.0",
+  "description": "Telegram alerts for Ink Network transactions",
+  "main": "monitor.js",
+  "scripts": {
+    "start": "node monitor.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
