@@ -12,6 +12,7 @@ const CONFIG = {
   addresses: [
     "0x38Ec515FE36b359b9d54e94337497C2D982aA1B1",
     "0x0c2EC7F7DA019F0708B4556C2489892952461734",
+    "0xD2551C818778066f9ADEc8749E2BA7D07E5631f7",
   ],
   inkRpcUrl: process.env.INK_RPC_URL || "https://rpc-qnd.inkonchain.com",
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "15000"),
